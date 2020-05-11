@@ -1,77 +1,36 @@
-import { AzureFunction, Context } from "@azure/functions"
-import { Cookie, CookieJar } from "tough-cookie"
-import requestPromise = require("request-promise")
+import { AzureFunction, Context } from "@azure/functions";
+import * as httpm from 'typed-rest-client/HttpClient';
 
-const email = process.env.EMAIL
-const password = process.env.PASSWORD
-const apiKey = process.env.MACKREL_API_KEY
+const client: httpm.HttpClient = new httpm.HttpClient('alert-batch', [], {
+  headers: {
+    'content-type': 'application/json',
+    'X-Api-Key': process.env.MACKREL_API_KEY
+  }
+});
 
 const timerTrigger: AzureFunction = async function (context: Context, myTimer: any): Promise<void> {
-  const checkedCount = await sendCheckedcountToMackerel()
-  console.log(new Date().toLocaleString(), checkedCount)
+  await sendCheckedcountToMackerel();
   context.done();
 };
 
-const fetchCheckedCount = async function(userToken : string) : Promise<number> {
-    const cookie = Cookie.fromJSON({
-        key: 'user',
-        value: userToken,
-        path: '/',
-        domain: 'techbookfest.org'
-    })
-    cookie.domain = 'techbookfest.org';
-    var cookiejar = new CookieJar();
-    cookiejar.setCookie(cookie, 'https://techbookfest.org', (err,cookie) => {})
-    const opt = {
-      url: 'https://techbookfest.org/api/circle/own',
-      cookiejar
-    }
-    const circles = JSON.parse(await requestPromise(opt))
-    const checkedCount = circles.filter(circle => circle.event.id === 'tbf08').map(circle => circle.checkedCount)[0]
-    return checkedCount
-  }
-  
-  const re = /^user=([^;]+)/
-  
-  const signIn = async () => {
-    const opt = {
-      method: 'POST',
-      uri: 'https://techbookfest.org/api/user/login',
-      body: JSON.stringify({ email, password }),
-      headers: {
-        'content-type': 'application/json'
-      },
-      resolveWithFullResponse: true
-    }
-    const res = await requestPromise(opt)
-    const matched = re.exec(res.headers['set-cookie'][0])
-    return matched[1]
-  }
-  
-  const crawl = async () => {
-    const userToken = await signIn()
-    const checkedCount = await fetchCheckedCount(userToken)
-    return checkedCount
-  }
-  
-  const sendToMackerel = async checkedCount => {
-      const opt = {
-          method: 'POST',
-          uri: 'https://api.mackerelio.com/api/v0/services/techbookfest/tsdb',
-          body: JSON.stringify([{ name: "circleCheck5", time: Math.floor(new Date().getTime() / 1000), value: checkedCount }]),
-          headers: {
-            'content-type': 'application/json',
-            'X-Api-Key': apiKey
-          },
-          resolveWithFullResponse: true
-        }
-      await requestPromise(opt)
-  }
+const sendCheckedcountToMackerel = async () => {
+  const checkedCount = await openAlerts();
+  console.log(new Date().toLocaleString(), checkedCount)
+  await sendToMackerel(checkedCount)
+}
 
-  const sendCheckedcountToMackerel = async () => {
-    const checkedCount = await crawl()
-    await sendToMackerel(checkedCount)  
-    return checkedCount
-  }
-  
+
+const openAlerts = async (): Promise<number> => {
+  const res: httpm.HttpClientResponse = await client.get('https://api.mackerelio.com/api/v0/alerts');
+  let body: string = await res.readBody();
+  const openAlert = JSON.parse(await body);
+  return openAlert.alerts.length;
+}
+
+const sendToMackerel = async (checkedCount: number) => {
+  const body = JSON.stringify([{ name: "openAlerts", time: Math.floor(new Date().getTime() / 1000), value: checkedCount }])
+  await client.post('https://api.mackerelio.com/api/v0/services/app/tsdb', body);
+}
+
+
 export default timerTrigger;

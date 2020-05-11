@@ -40,4 +40,6 @@ venv.bak/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*$py.class
+*$py.class0000::
+
+.vscode/settings.json
